@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 import argparse
+from prompts import system_prompt
+from call_function import available_functions, call_function
 
 def main():
     parser = argparse.ArgumentParser(description="Chatbot")
@@ -18,10 +20,14 @@ def main():
     client = genai.Client(api_key=api_key)
 
     messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
-
+    
     response = client.models.generate_content(
         model='gemini-2.5-flash',
-        contents=messages
+        contents=messages,
+        config=types.GenerateContentConfig(
+            tools=[available_functions],
+            system_instruction=system_prompt
+        )
     )
 
     if response.usage_metadata == None:
@@ -31,8 +37,26 @@ def main():
         print(f"User prompt: {args.user_prompt}")
         print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
         print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
-        
-    print(response.text)
+    
+    if response.function_calls != None:
+        for function_call in response.function_calls:
+            print(f"Calling function: {function_call.name}({function_call.args})")
+            function_call_result = call_function(function_call)
+            if not function_call_result.parts:
+                raise Exception("no parts returned")
+            if not function_call_result.parts[0].function_response:
+                raise Exception("no function_response")
+            if not function_call_result.parts[0].function_response.response:
+                raise Exception("no function_response.response")
+            
+            function_results = [function_call_result.parts[0]]
+
+            if args.verbose:
+                print(f"-> {function_call_result.parts[0].function_response.response}")
+                
+
+    else:
+        print(response.text)
 
 
 if __name__ == "__main__":
